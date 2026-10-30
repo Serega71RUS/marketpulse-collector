@@ -7,7 +7,7 @@ import (
 	"github.com/Serega71RUS/marketpulse-collector/internal/domain"
 )
 
-func ToDomainTrade(event BinanceTradeEvent) domain.Trade {
+func ToDomainTrade(event BinanceTradeEventOutput) domain.Trade {
 	return domain.Trade{
 		Exchange:     "binance",
 		Symbol:       event.Symbol,

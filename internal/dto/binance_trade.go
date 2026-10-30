@@ -1,6 +1,12 @@
 package dto
 
-type BinanceTradeEvent struct {
+type BinanceTradeEventInput struct {
+	Method string   `json:"method"`
+	Params []string `json:"params"`
+	ID     string   `json:"id"`
+}
+
+type BinanceTradeEventOutput struct {
 	EventType    string `json:"e"`
 	EventTime    int64  `json:"E"`
 	Symbol       string `json:"s"`

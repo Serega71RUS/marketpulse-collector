@@ -9,7 +9,7 @@ import (
 )
 
 func Test_ToDomainTrade_Success(t *testing.T) {
-	input := BinanceTradeEvent{
+	input := BinanceTradeEventOutput{
 		Symbol:       "BNBUSDT",
 		TradeID:      1608510363,
 		Price:        "743.71000000",
