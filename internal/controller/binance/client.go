@@ -3,64 +3,111 @@ package binance
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"net"
+	"time"
 
 	"github.com/Serega71RUS/marketpulse-collector/internal/dto"
+	"github.com/Serega71RUS/marketpulse-collector/internal/usecase"
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 )
 
 type Config struct {
-	Host string `envconfig:"HTTP_BINANCE_HOST"`
-	Port string `envconfgi:"HTTP_BINANCE_PORT"`
+	Host string `envconfig:"HTTP_BINANCE_HOST" required:"true"`
+	Port string `envconfig:"HTTP_BINANCE_PORT" required:"true"`
 }
 
-type BinanceHttpClient struct {
-	client http.Client
-	host   string
+type Client struct {
+	websocket *websocket.Dialer
+	host      string
+	usecase   *usecase.UseCase
+	stop      context.CancelFunc
+	done      chan struct{}
 }
 
-//func New(cfg Config) *BinanceHttpClient {
-//	client := &BinanceHttpClient{
-//		client: http.Client{},
-//		host:   net.JoinHostPort(cfg.Host, cfg.Port),
-//	}
-//}
+func New(cfg Config, uc *usecase.UseCase) *Client {
+	ctx, stop := context.WithCancel(context.Background())
 
-func ReadTrades(ctx context.Context) error {
-	const endpoint = "wss://stream.binance.com:443/ws/btcusdt@trade"
+	client := &Client{
+		websocket: websocket.DefaultDialer,
+		host:      net.JoinHostPort(cfg.Host, cfg.Port),
+		usecase:   uc,
+		stop:      stop,
+		done:      make(chan struct{}),
+	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, endpoint, nil)
+	go func() {
+		defer close(client.done)
+		client.run(ctx)
+	}()
+
+	return client
+}
+
+func (b *Client) ReadTrades(ctx context.Context) error {
+	endpoint := "wss://" + b.host + "/ws/btcusdt@trade"
+
+	conn, _, err := b.websocket.DialContext(ctx, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("connect Binance: %w", err)
 	}
 	defer conn.Close()
 
-	for range 10 {
+	stopClose := context.AfterFunc(ctx, func() {
+		conn.Close()
+	})
+	defer stopClose()
+
+	for {
 		var event dto.BinanceTradeEventOutput
-		if err := conn.ReadJSON(&event); err != nil {
+
+		err := conn.ReadJSON(&event)
+
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return fmt.Errorf("read trade: %w", err)
 		}
 
+		if event.EventType != "trade" {
+			log.Debug().Str("event_type", event.EventType).Msg("event skipped")
+			continue
+		}
+
 		trade := dto.ToDomainTrade(event)
-		fmt.Printf("%#v\n", trade)
+
+		err = b.usecase.ProcessTrade(ctx, trade)
+		if err != nil {
+			return fmt.Errorf("process trade: %w", err)
+		}
+
 	}
-	return nil
 }
 
-//func (c *BinanceHttpClient) TradeStream(symbol string, ctx context.Context) {
-//	var tradeStream = "ws/" + symbol + "@trade"
-//
-//	path := fmt.Sprintf("wss://%s/%s", c.host, tradeStream)
-//
-//	req, err := http.NewRequestWithContext(ctx, http.M)
-//
-//	c.client.Do()
-//
-//	input := dto.BinanceTradeEventInput{
-//		Method: "SUBSCRIBE",
-//		Params: []string{"bnbusdt@trade"},
-//		ID:     "e9d6b4349871b40611412680b3445fac",
-//	}
-//
-//	c
-//}
+func (b *Client) run(ctx context.Context) {
+	for {
+		err := b.ReadTrades(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Error().Err(err).Msg("binance reconnect, next attempt in 3 seconds")
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+}
+
+func (b *Client) Close() {
+	log.Info().Msg("binance client: closing")
+	b.stop()
+
+	<-b.done
+	log.Info().Msg("binance client: closed")
+}

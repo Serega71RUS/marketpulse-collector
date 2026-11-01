@@ -2,14 +2,25 @@ package main
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/Serega71RUS/marketpulse-collector/internal/controller/binance"
+	"github.com/Serega71RUS/marketpulse-collector/config"
+	"github.com/Serega71RUS/marketpulse-collector/internal/app"
+	"github.com/Serega71RUS/marketpulse-collector/pkg/logger"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
-	err := binance.ReadTrades(context.Background())
+	cfg, err := config.New()
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
+		log.Fatal().Err(err).Msg("config error")
+	}
+
+	logger.Init(cfg.Logger)
+
+	ctx := context.Background()
+
+	err = app.Run(ctx, cfg)
+	if err != nil {
+		log.Error().Err(err).Msg("app error")
 	}
 }
